@@ -864,6 +864,11 @@ struct vad_time_mapping {
     int64_t original_time;   // Corresponding time in original audio
 };
 
+struct whisper_beam_text {
+    std::string text;
+    double score;
+};
+
 struct whisper_state {
     int64_t t_sample_us = 0;
     int64_t t_encode_us = 0;
@@ -962,6 +967,8 @@ struct whisper_state {
     bool has_vad_segments = false;
 
     std::vector<vad_time_mapping> vad_mapping_table;
+
+    std::vector<whisper_beam_text> beams;
 };
 
 struct whisper_context {
@@ -7514,6 +7521,25 @@ int whisper_full_with_state(
                 }
 
                 WHISPER_LOG_DEBUG("%s: best decoder = %d\n", __func__, best_decoder_id);
+
+                state->beams.clear();
+                for (int j = 0; j < n_decoders_cur; ++j) {
+                    const auto & dec = state->decoders[j];
+                    if (dec.failed) {
+                        continue;
+                    }
+
+                    std::string text;
+                    for (int t = 0; t < dec.sequence.result_len; ++t) {
+                        if (params.print_special || dec.sequence.tokens[t].id < whisper_token_eot(ctx)) {
+                            text += whisper_token_to_str(ctx, dec.sequence.tokens[t].id);
+                        }
+                    }
+                    state->beams.push_back({ std::move(text), dec.sequence.score });
+                }
+                std::sort(state->beams.begin(), state->beams.end(), [](const whisper_beam_text & a, const whisper_beam_text & b) {
+                    return a.score > b.score;
+                });
             }
 
             bool success = true;
@@ -8031,6 +8057,32 @@ float whisper_full_get_segment_no_speech_prob_from_state(struct whisper_state * 
     return state->result_all[i_segment].no_speech_prob;
 }
 
+int whisper_full_n_hypotheses_from_state(struct whisper_state * state) {
+    return state->beams.size();
+}
+
+int whisper_full_n_hypotheses(struct whisper_context * ctx) {
+    return whisper_full_n_hypotheses_from_state(ctx->state);
+}
+
+const char * whisper_full_get_hypothesis_text_from_state(struct whisper_state * state, int i_hyp) {
+    if (i_hyp < 0 || i_hyp >= (int) state->beams.size()) return nullptr;
+    return state->beams[i_hyp].text.c_str();
+}
+
+const char * whisper_full_get_hypothesis_text(struct whisper_context * ctx, int i_hyp) {
+    return whisper_full_get_hypothesis_text_from_state(ctx->state, i_hyp);
+}
+
+float whisper_full_get_hypothesis_score_from_state(struct whisper_state * state, int i_hyp) {
+    if (i_hyp < 0 || i_hyp >= (int) state->beams.size()) return 0.0f;
+    return state->beams[i_hyp].score;
+}
+
+float whisper_full_get_hypothesis_score(struct whisper_context * ctx, int i_hyp) {
+    return whisper_full_get_hypothesis_score_from_state(ctx->state, i_hyp);
+}
+
 // =================================================================================================
 
 //
@@ -8325,10 +8377,6 @@ WHISPER_API const char * whisper_bench_ggml_mul_mat_str(int n_threads) {
 // token-level timestamps
 //
 
-static int timestamp_to_sample(int64_t t, int n_samples) {
-    return std::max(0, std::min((int) n_samples - 1, (int) ((t*WHISPER_SAMPLE_RATE)/100)));
-}
-
 static int64_t sample_to_timestamp(int i_sample) {
     return (100ll*i_sample)/WHISPER_SAMPLE_RATE;
 }
@@ -8376,6 +8424,18 @@ static std::vector<float> get_signal_energy(const float * signal, int n_samples,
     }
 
     return result;
+}
+
+static int timestamp_to_sample(int64_t t, int64_t segment_t0, int n_samples) {
+    // Convert absolute timestamp to segment-relative timestamp
+    int64_t relative_t = t - segment_t0;
+    int sample = (int)((relative_t * WHISPER_SAMPLE_RATE) / 100);
+    return std::max(0, std::min(n_samples - 1, sample));
+}
+
+static int64_t sample_to_timestamp(int i_sample, int64_t segment_t0) {
+    int64_t relative_timestamp = (100ll * i_sample) / WHISPER_SAMPLE_RATE;
+    return relative_timestamp + segment_t0;
 }
 
 static void whisper_exp_compute_token_level_timestamps(
@@ -8518,8 +8578,8 @@ static void whisper_exp_compute_token_level_timestamps(
                 continue;
             }
 
-            int s0 = timestamp_to_sample(tokens[j].t0, n_samples);
-            int s1 = timestamp_to_sample(tokens[j].t1, n_samples);
+            int s0 = timestamp_to_sample(tokens[j].t0, segment.t0, n_samples);
+            int s1 = timestamp_to_sample(tokens[j].t1, segment.t0, n_samples);
 
             const int ss0 = std::max(s0 - hw, 0);
             const int ss1 = std::min(s1 + hw, n_samples);
@@ -8540,7 +8600,7 @@ static void whisper_exp_compute_token_level_timestamps(
                     while (k > 0 && state.energy[k] > thold) {
                         k--;
                     }
-                    tokens[j].t0 = sample_to_timestamp(k);
+                    tokens[j].t0 = sample_to_timestamp(k, segment.t0);
                     if (tokens[j].t0 < tokens[j - 1].t1) {
                         tokens[j].t0 = tokens[j - 1].t1;
                     } else {
@@ -8551,7 +8611,7 @@ static void whisper_exp_compute_token_level_timestamps(
                         k++;
                     }
                     s0 = k;
-                    tokens[j].t0 = sample_to_timestamp(k);
+                    tokens[j].t0 = sample_to_timestamp(k, segment.t0);
                 }
             }
 
@@ -8561,7 +8621,7 @@ static void whisper_exp_compute_token_level_timestamps(
                     while (k < n_samples - 1 && state.energy[k] > thold) {
                         k++;
                     }
-                    tokens[j].t1 = sample_to_timestamp(k);
+                    tokens[j].t1 = sample_to_timestamp(k, segment.t0);
                     if (j < n - 1 && tokens[j].t1 > tokens[j + 1].t0) {
                         tokens[j].t1 = tokens[j + 1].t0;
                     } else {
@@ -8572,7 +8632,7 @@ static void whisper_exp_compute_token_level_timestamps(
                         k--;
                     }
                     s1 = k;
-                    tokens[j].t1 = sample_to_timestamp(k);
+                    tokens[j].t1 = sample_to_timestamp(k, segment.t0);
                 }
             }
         }
