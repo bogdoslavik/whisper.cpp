@@ -864,6 +864,11 @@ struct vad_time_mapping {
     int64_t original_time;   // Corresponding time in original audio
 };
 
+struct whisper_beam_text {
+    std::string text;
+    double score;
+};
+
 struct whisper_state {
     int64_t t_sample_us = 0;
     int64_t t_encode_us = 0;
@@ -962,6 +967,8 @@ struct whisper_state {
     bool has_vad_segments = false;
 
     std::vector<vad_time_mapping> vad_mapping_table;
+
+    std::vector<whisper_beam_text> beams;
 };
 
 struct whisper_context {
@@ -7514,6 +7521,25 @@ int whisper_full_with_state(
                 }
 
                 WHISPER_LOG_DEBUG("%s: best decoder = %d\n", __func__, best_decoder_id);
+
+                state->beams.clear();
+                for (int j = 0; j < n_decoders_cur; ++j) {
+                    const auto & dec = state->decoders[j];
+                    if (dec.failed) {
+                        continue;
+                    }
+
+                    std::string text;
+                    for (int t = 0; t < dec.sequence.result_len; ++t) {
+                        if (params.print_special || dec.sequence.tokens[t].id < whisper_token_eot(ctx)) {
+                            text += whisper_token_to_str(ctx, dec.sequence.tokens[t].id);
+                        }
+                    }
+                    state->beams.push_back({ std::move(text), dec.sequence.score });
+                }
+                std::sort(state->beams.begin(), state->beams.end(), [](const whisper_beam_text & a, const whisper_beam_text & b) {
+                    return a.score > b.score;
+                });
             }
 
             bool success = true;
@@ -8029,6 +8055,32 @@ float whisper_full_get_segment_no_speech_prob(struct whisper_context * ctx, int 
 
 float whisper_full_get_segment_no_speech_prob_from_state(struct whisper_state * state, int i_segment) {
     return state->result_all[i_segment].no_speech_prob;
+}
+
+int whisper_full_n_hypotheses_from_state(struct whisper_state * state) {
+    return state->beams.size();
+}
+
+int whisper_full_n_hypotheses(struct whisper_context * ctx) {
+    return whisper_full_n_hypotheses_from_state(ctx->state);
+}
+
+const char * whisper_full_get_hypothesis_text_from_state(struct whisper_state * state, int i_hyp) {
+    if (i_hyp < 0 || i_hyp >= (int) state->beams.size()) return nullptr;
+    return state->beams[i_hyp].text.c_str();
+}
+
+const char * whisper_full_get_hypothesis_text(struct whisper_context * ctx, int i_hyp) {
+    return whisper_full_get_hypothesis_text_from_state(ctx->state, i_hyp);
+}
+
+float whisper_full_get_hypothesis_score_from_state(struct whisper_state * state, int i_hyp) {
+    if (i_hyp < 0 || i_hyp >= (int) state->beams.size()) return 0.0f;
+    return state->beams[i_hyp].score;
+}
+
+float whisper_full_get_hypothesis_score(struct whisper_context * ctx, int i_hyp) {
+    return whisper_full_get_hypothesis_score_from_state(ctx->state, i_hyp);
 }
 
 // =================================================================================================
