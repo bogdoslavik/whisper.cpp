@@ -363,50 +363,38 @@ int main(int argc, char ** argv) {
                     printf("\n");
                 }
 
-                if (!params.top_n_set) {
-                    const int n_segments = whisper_full_n_segments(ctx);
-                    for (int i = 0; i < n_segments; ++i) {
-                        const char * text = whisper_full_get_segment_text(ctx, i);
+                const int n_segments = whisper_full_n_segments(ctx);
+                for (int i = 0; i < n_segments; ++i) {
+                    const char * text = whisper_full_get_segment_text(ctx, i);
 
-                        if (params.no_timestamps) {
-                            printf("%s", text);
-                            fflush(stdout);
+                    if (params.no_timestamps) {
+                        printf("%s", text);
+                        fflush(stdout);
 
-                            if (params.fname_out.length() > 0) {
-                                fout << text;
-                            }
-                        } else {
-                            const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
-                            const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
+                        if (params.fname_out.length() > 0) {
+                            fout << text;
+                        }
+                    } else {
+                        const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
+                        const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                            std::string output = "[" + to_timestamp(t0, false) + " --> " + to_timestamp(t1, false) + "]  " + text;
+                        std::string output = "[" + to_timestamp(t0, false) + " --> " + to_timestamp(t1, false) + "]  " + text;
 
-                            if (whisper_full_get_segment_speaker_turn_next(ctx, i)) {
-                                output += " [SPEAKER_TURN]";
-                            }
+                        if (whisper_full_get_segment_speaker_turn_next(ctx, i)) {
+                            output += " [SPEAKER_TURN]";
+                        }
 
-                            output += "\n";
+                        output += "\n";
 
-                            printf("%s", output.c_str());
-                            fflush(stdout);
+                        printf("%s", output.c_str());
+                        fflush(stdout);
 
-                            if (params.fname_out.length() > 0) {
-                                fout << output;
-                            }
+                        if (params.fname_out.length() > 0) {
+                            fout << output;
                         }
                     }
                 }
 
-                if (params.top_n_set && params.beam_size > 1) {
-                    int nh = whisper_full_n_hypotheses(ctx);
-                    if (params.top_n > 0) nh = std::min(nh, params.top_n);
-                    for (int h = 0; h < nh; ++h) {
-                        const char * hyp = whisper_full_get_hypothesis_text(ctx, h);
-                        if (hyp) {
-                            printf("[%d] %s\n", h + 1, hyp);
-                        }
-                    }
-                }
 
                 if (params.fname_out.length() > 0) {
                     fout << std::endl;
@@ -420,7 +408,9 @@ int main(int argc, char ** argv) {
 
             ++n_iter;
 
-            if (!use_vad && (n_iter % n_new_line) == 0) {
+            bool final_block = use_vad || (n_iter % n_new_line == 0);
+
+            if (!use_vad && final_block) {
                 printf("\n");
 
                 // keep part of the audio for next iteration to try to mitigate word boundary issues
@@ -436,6 +426,17 @@ int main(int argc, char ** argv) {
                         for (int j = 0; j < token_count; ++j) {
                             prompt_tokens.push_back(whisper_full_get_token_id(ctx, i, j));
                         }
+                    }
+                }
+            }
+
+            if (final_block && params.top_n_set && params.beam_size > 1) {
+                int nh = whisper_full_n_hypotheses(ctx);
+                if (params.top_n > 0) nh = std::min(nh, params.top_n);
+                for (int h = 0; h < nh; ++h) {
+                    const char * hyp = whisper_full_get_hypothesis_text(ctx, h);
+                    if (hyp) {
+                        printf("[%d] %s\n", h + 1, hyp);
                     }
                 }
             }
