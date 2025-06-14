@@ -436,7 +436,7 @@ int main(int argc, char ** argv) {
                 for (int h = 0; h < nh; ++h) {
                     const char * hyp = whisper_full_get_hypothesis_text(ctx, h);
                     if (hyp) {
-                        printf("[%d] %s\n", h + 1, hyp);
+                        printf("%d: %s\n", h + 1, hyp);
                     }
                 }
             }
