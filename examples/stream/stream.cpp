@@ -62,7 +62,7 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (arg == "-mt"   || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
         else if (arg == "-ac"   || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
         else if (arg == "-bs"   || arg == "--beam-size")     { params.beam_size     = std::stoi(argv[++i]); }
-        else if (arg == "-tn"   || arg == "--top")          { params.top_n         = std::stoi(argv[++i]); }
+        else if (arg == "-tn"   || arg == "--top")           { params.top_n         = std::stoi(argv[++i]); }
         else if (arg == "-vth"  || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
         else if (arg == "-fth"  || arg == "--freq-thold")    { params.freq_thold    = std::stof(argv[++i]); }
         else if (arg == "-tr"   || arg == "--translate")     { params.translate     = true; }
