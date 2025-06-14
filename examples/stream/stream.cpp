@@ -25,6 +25,7 @@ struct whisper_params {
     int32_t audio_ctx  = 0;
     int32_t beam_size  = -1;
     int32_t top_n      = 1;
+    bool    top_n_set  = false;
 
     float vad_thold    = 0.6f;
     float freq_thold   = 100.0f;
@@ -62,7 +63,7 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (arg == "-mt"   || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
         else if (arg == "-ac"   || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
         else if (arg == "-bs"   || arg == "--beam-size")     { params.beam_size     = std::stoi(argv[++i]); }
-        else if (arg == "-tn"   || arg == "--top")           { params.top_n         = std::stoi(argv[++i]); }
+        else if (arg == "-tn"   || arg == "--top")          { params.top_n         = std::stoi(argv[++i]); params.top_n_set = true; }
         else if (arg == "-vth"  || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
         else if (arg == "-fth"  || arg == "--freq-thold")    { params.freq_thold    = std::stof(argv[++i]); }
         else if (arg == "-tr"   || arg == "--translate")     { params.translate     = true; }
@@ -201,6 +202,10 @@ int main(int argc, char ** argv) {
         }
 
         fprintf(stderr, "\n");
+    }
+
+    if (params.top_n_set && params.beam_size <= 1) {
+        fprintf(stderr, "%s: warning: --top ignored because --beam-size <= 1\n", __func__);
     }
 
     int n_iter = 0;
@@ -358,41 +363,43 @@ int main(int argc, char ** argv) {
                     printf("\n");
                 }
 
-                const int n_segments = whisper_full_n_segments(ctx);
-                for (int i = 0; i < n_segments; ++i) {
-                    const char * text = whisper_full_get_segment_text(ctx, i);
+                if (!params.top_n_set) {
+                    const int n_segments = whisper_full_n_segments(ctx);
+                    for (int i = 0; i < n_segments; ++i) {
+                        const char * text = whisper_full_get_segment_text(ctx, i);
 
-                    if (params.no_timestamps) {
-                        printf("%s", text);
-                        fflush(stdout);
+                        if (params.no_timestamps) {
+                            printf("%s", text);
+                            fflush(stdout);
 
-                        if (params.fname_out.length() > 0) {
-                            fout << text;
-                        }
-                    } else {
-                        const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
-                        const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
+                            if (params.fname_out.length() > 0) {
+                                fout << text;
+                            }
+                        } else {
+                            const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
+                            const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
-                        std::string output = "[" + to_timestamp(t0, false) + " --> " + to_timestamp(t1, false) + "]  " + text;
+                            std::string output = "[" + to_timestamp(t0, false) + " --> " + to_timestamp(t1, false) + "]  " + text;
 
-                        if (whisper_full_get_segment_speaker_turn_next(ctx, i)) {
-                            output += " [SPEAKER_TURN]";
-                        }
+                            if (whisper_full_get_segment_speaker_turn_next(ctx, i)) {
+                                output += " [SPEAKER_TURN]";
+                            }
 
-                        output += "\n";
+                            output += "\n";
 
-                        printf("%s", output.c_str());
-                        fflush(stdout);
+                            printf("%s", output.c_str());
+                            fflush(stdout);
 
-                        if (params.fname_out.length() > 0) {
-                            fout << output;
+                            if (params.fname_out.length() > 0) {
+                                fout << output;
+                            }
                         }
                     }
                 }
 
-                if (params.top_n > 1 && params.beam_size > 1) {
+                if (params.top_n_set && params.beam_size > 1) {
                     int nh = whisper_full_n_hypotheses(ctx);
-                    nh = std::min(nh, params.top_n);
+                    if (params.top_n > 0) nh = std::min(nh, params.top_n);
                     for (int h = 0; h < nh; ++h) {
                         const char * hyp = whisper_full_get_hypothesis_text(ctx, h);
                         if (hyp) {
