@@ -354,12 +354,12 @@ int main(int argc, char ** argv) {
                     printf("%s", std::string(100, ' ').c_str());
 
                     printf("\33[2K\r");
-                } else {
+                } else if (!params.top_n_set) {
                     const int64_t t1 = (t_last - t_start).count()/1000000;
                     const int64_t t0 = std::max(0.0, t1 - pcmf32.size()*1000.0/WHISPER_SAMPLE_RATE);
 
                     printf("\n");
-                    printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int) t0, (int) t1);
+                    printf("### Transcription %d START | t0 = %d ms | t1 = %d ms\n", n_iter, (int)t0, (int)t1);
                     printf("\n");
                 }
 
@@ -374,7 +374,7 @@ int main(int argc, char ** argv) {
                         if (params.fname_out.length() > 0) {
                             fout << text;
                         }
-                    } else {
+                    } else if (!params.top_n_set) {
                         const int64_t t0 = whisper_full_get_segment_t0(ctx, i);
                         const int64_t t1 = whisper_full_get_segment_t1(ctx, i);
 
@@ -400,7 +400,7 @@ int main(int argc, char ** argv) {
                     fout << std::endl;
                 }
 
-                if (use_vad) {
+                if (use_vad && !params.top_n_set) {
                     printf("\n");
                     printf("### Transcription %d END\n", n_iter);
                 }
@@ -436,9 +436,10 @@ int main(int argc, char ** argv) {
                 for (int h = 0; h < nh; ++h) {
                     const char * hyp = whisper_full_get_hypothesis_text(ctx, h);
                     if (hyp) {
-                        printf("%d: %s\n", h + 1, hyp);
+                        printf("%s|\t|", hyp);
                     }
                 }
+                printf("\n");
             }
             fflush(stdout);
         }
