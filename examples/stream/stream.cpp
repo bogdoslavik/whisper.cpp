@@ -14,6 +14,7 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <iostream> 
 
 // command-line parameters
 struct whisper_params {
@@ -65,7 +66,7 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (arg == "-mt"   || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
         else if (arg == "-ac"   || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
         else if (arg == "-bs"   || arg == "--beam-size")     { params.beam_size     = std::stoi(argv[++i]); }
-        else if (arg == "-tn"   || arg == "--top")          { params.top_n         = std::stoi(argv[++i]); params.top_n_set = true; }
+        else if (arg == "-tn"   || arg == "--top")           { params.top_n         = std::stoi(argv[++i]); params.top_n_set = true; }
         else if (arg == "-vth"  || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
         else if (arg == "-fth"  || arg == "--freq-thold")    { params.freq_thold    = std::stof(argv[++i]); }
         else if (arg == "-tr"   || arg == "--translate")     { params.translate     = true; }
@@ -79,7 +80,7 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (arg == "-sa"   || arg == "--save-audio")    { params.save_audio    = true; }
         else if (arg == "-ng"   || arg == "--no-gpu")        { params.use_gpu       = false; }
         else if (arg == "-fa"   || arg == "--flash-attn")    { params.flash_attn    = true; }
-        else if (                 arg == "--pausable")       { params.pausable      = true; }
+        else if (arg == "-p"    || arg == "--pausable")      { params.pausable      = true; }
 
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
@@ -119,7 +120,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  -sa,      --save-audio    [%-7s] save the recorded audio to a file\n",              params.save_audio ? "true" : "false");
     fprintf(stderr, "  -ng,      --no-gpu        [%-7s] disable GPU inference\n",                          params.use_gpu ? "false" : "true");
     fprintf(stderr, "  -fa,      --flash-attn    [%-7s] flash attention during inference\n",               params.flash_attn ? "true" : "false");
-    fprintf(stderr, "            --pausable      [%-7s] allow stdin commands [PAUSE]/[RESUME]\n", params.pausable ? "true" : "false");
+    fprintf(stderr, "            --pausable      [%-7s] allow stdin commands p,n (PAUSE)/(RESUME)\n",      params.pausable ? "true" : "false");
     fprintf(stderr, "\n");
 }
 
@@ -249,12 +250,13 @@ int main(int argc, char ** argv) {
                 if (!std::getline(std::cin, line)) {
                     break;
                 }
-                if (line == "[PAUSE]") {
+
+                if (line == "p") {
                     control_state = 1;
-                } else if (line == "[RESUME]") {
+                } else if (line == "r") {
                     control_state = 2;
                 } else {
-                    fprintf(stderr, "Only [PAUSE], [RESUME] accepted\n");
+                    fprintf(stderr, "[ERROR] Only 'p' (pause), 'r' (resume) accepted]\n");
                 }
             }
         });
@@ -278,8 +280,15 @@ int main(int argc, char ** argv) {
         if (params.pausable) {
             int st = control_state.exchange(0);
             if (st == 1 && !is_paused) {
+                //audio.clear();
                 audio.pause();
-                audio.clear();
+
+                params.no_context = true;
+
+                pcmf32.clear();
+                pcmf32_new.clear();
+                pcmf32_old.clear();
+                prompt_tokens.clear();
                 is_paused = true;
             } else if (st == 2 && is_paused) {
                 audio.resume();
